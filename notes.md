@@ -331,3 +331,44 @@ values, the function will return `None`. So if the return type was `Int` before 
     }
     ```
 
+### Functional Collections
+
+The `Set` Collection is actually implemented as a function!
+```scala
+trait Set[A] extends ((A) => Boolean) // with ...
+```
+
+Sequences are "callable" through an  integer index, therefore we can think of sequences as partial functions from Int 
+to some other type A.
+
+Similarly, `Map`s are callable through their keys, therefore we can think of `Map`s as partial functions from some type
+A to some type B. 
+
+### Currying and Partially Applied Functions
+
+When calling a curried function without all expected arguments (example below), the compiler expects a value type to be
+supplied. 
+
+```scala
+def curriedAdder(x: Int)(y: Int): Int = x + y
+val add4: Int => Int = curriedAdder(4) // type annotation must be supplied
+``` 
+
+Behind the scenes, **lifting** is performed.
+
+**lifting** is the idea of transforming a method to a function, also known as **ETA-EXPANSIONS**.
+
+This can also be done directly by using the `_` annotation like so:
+
+```scala
+def curriedAdder(x: Int)(y: Int): Int = x + y
+val add5 = curriedAdder(5) _ // do ETA-expansion and convert to Int => Int
+```
+
+**Note**: Underscores (`_`) are a powerful tool in scala: 
+
+```scala
+def concatenator(a: String, b: String, c: String) = a + b + c
+val insertName = concatenator("Hello, I'm ", _: String, ", how are you?")
+println(insertName("Daniel")) // prints "Hello, I'm Daniel, how are you?"
+``` 
