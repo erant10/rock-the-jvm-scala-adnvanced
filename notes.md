@@ -372,3 +372,74 @@ def concatenator(a: String, b: String, c: String) = a + b + c
 val insertName = concatenator("Hello, I'm ", _: String, ", how are you?")
 println(insertName("Daniel")) // prints "Hello, I'm Daniel, how are you?"
 ``` 
+
+### Lazy Evaluations
+
+the `lazy` keyword allows to delay the evaluation of values.
+
+The following code will not throw an error until `x` is used:
+
+```scala
+lazy val x: Int = throw new RuntimeException
+```
+
+Once a lazy value is evaluated, the same value will stay assigned to that same name.
+
+A useful example for this is when the evaluation of a value if "heavy". We can use `lazy val` to make sure that the 
+evaluation is done only once.
+
+```scala
+def byNameMethod(n: => Int): Int = {
+  lazy val t = n // only evaluated once!
+  t + t + t + 1
+}
+def retrieveMagicValue = {
+  // side effect or a long computation
+  println("waiting")
+  Thread.sleep(1000)
+  42
+}
+println(byNameMethod(retrieveMagicValue)) // "waiting is only printed once"
+```
+
+Another example is `withFilter`, which is a filtering method that evaluated the predicates on a **BY NEED** basis.
+
+```scala
+// filtering with lazy vals
+def lessThan30(i: Int): Boolean = {
+  println(s"$i is less than 30?")
+  i < 30
+}
+def greaterThan20(i: Int): Boolean = {
+  println(s"$i is greater than 20?")
+  i > 20
+}
+val numbers = List(1,25,40,5,23)
+val lt30lazy = numbers.withFilter(lessThan30) // lazy vals under the hood
+val gt20lazy = lt30lazy.withFilter(greaterThan20)
+println(gt20lazy.foreach(println))
+```
+
+this will print:
+```
+1 is less than 30?
+1 is greater than 20?
+25 is less than 30?
+25 is greater than 20?
+25
+40 is less than 30?
+5 is less than 30?
+5 is greater than 20?
+23 is less than 30?
+23 is greater than 20?
+23
+```
+
+Note that both conditions are evaluated one after the other for each list item.
+
+The **Call-by-need** technique refers to creating a **by-name** method, and then using if as a lazy val:
+
+```scala
+def byName = "hi"
+lazy val res = byName 
+```
