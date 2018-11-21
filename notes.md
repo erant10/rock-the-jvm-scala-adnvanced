@@ -443,3 +443,79 @@ The **Call-by-need** technique refers to creating a **by-name** method, and then
 def byName = "hi"
 lazy val res = byName 
 ```
+
+### Monads
+
+`Monad`s are a kind of types which have some fundamental operations
+
+```scala
+trait MonadTemplate[A] {
+  def unit(value: A): MonadTemplate[A]
+  def flatMap[B](f: A => MonadTemplate[B]): MonadTemplate[B]
+}
+```
+
+The 2 fundamental operations of monads are:
+
+- The `unit` operation, AKA *pure* or *apply*, constructs a monad out of a single (or many) values.
+
+- The `flatMap` operation, AKA *bind*, transforms a monad of a certain type parameter to a monad of another type 
+parameters.
+
+These 2 operations must satisfy the *monad laws*:
+
+1. **Left Identity**:
+
+    `unit(x).flatMap(f) == f(x)`.
+
+2. **Right Identity**:
+
+    `aMonadInstance.flatMap(unit) == aMonadInstance`.
+
+3. **Associativity**:
+
+    `m.flatMap(f).flatMap(g) == m.flatMap(x => f(x).flatMap(g))`
+
+
+**Example 1: `List`**
+
+1. **Left Identity**:
+
+    `List(x).flatMap(f) == f(x) ++ Nil.flatMap(f) == f(x)`.
+
+2. **Right Identity**:
+
+    `list.flatMap(x => List(x)) == list `.
+
+3. **Associativity**:
+ 
+    `[a b c].flatMap(f).flatMap(g) == (f(a) ++ f(b) ++ f(c)).flatMap(g)`
+    
+    `== f(a).flatMap(g) ++ f(b).flatMap(g) ++ f(c)).flatMap(g)`
+    
+    `== [a b c].flatMap(f(_).flatMap(g)) == [a b c].flatMap(x => f(x).flatMap(g))`
+
+    
+**Example 2: `Option`**
+
+We will focus on the `Some` case because the `None` case is trivial.
+
+1. **Left Identity**:
+
+    `Option(x).flatMap(f) == f(x)`
+    
+    `Some(x).flatMap(f) == f(x)`
+
+2. **Right Identity**:
+ 
+    `opt.flatMap(x => Option(x)) == opt`
+    
+    `Some(v).flatMap(x => Option(x)) == Option(v) == Some(v)`
+
+3. **Associativity**:
+ 
+    `o.flatMap(f).flatMap(g) == o.flatMap(x => f(x).flatMap(g))`
+    
+    `Some(v).flatMap(f).flatMap(g) == f(v).flatMap(g))`
+    
+    `Some(v).flatMap(x => f(x).flatMap(g)) == f(v).flatMap(g))`
