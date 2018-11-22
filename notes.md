@@ -519,3 +519,141 @@ We will focus on the `Some` case because the `None` case is trivial.
     `Some(v).flatMap(f).flatMap(g) == f(v).flatMap(g))`
     
     `Some(v).flatMap(x => f(x).flatMap(g)) == f(v).flatMap(g))`
+
+## Section 3 - Functional Concurrent Programming
+
+### Introduction
+
+One of the critical pieces of the parallel programming on the JVM is a `Thread` which takes an implementation of the 
+`Runnable` interface as a parameter.
+
+Running a thread in parallel is done by calling the `start` method. 
+
+Starting a thread will create a JVM thread which runs on top of an OS thread.
+
+```scala
+val aRunnable = new Runnable {
+  override def run(): Unit = println("Running in parallel")
+}
+val aThread = new Thread(aRunnable)
+aThread.start() // gives the signal to the JVM thread 
+aThread.join() // blocks until aThread finishes running
+aRunnable.run() // doesn't do anything in parallel!
+```
+
+There is an important distinction between the thread instance which we work with and the actual JVM thread.
+
+If we want to execute some code in parallel, we should call the `start` method on the thread instance, and **not** the 
+`run` method on the `Runnuble`instance.
+
+* Unless configured otherwise, threads will behave differently and produce different results on each run.
+
+
+**Executors**
+
+Threads are really expensive to start an kill, and a simple solution to this is to reuse them. 
+
+The standard library offers a standard API to reuse threads with executors and thread pools.
+
+**Race Conditions**
+
+A race condition is a situation when multiple threads are attempting the set the same memory zone at the same time.
+
+```scala
+class BankAccount(var balance: Int) {
+  override def toString: String = "" + balance
+}
+/* UNSAFE buy */
+def buy(account: BankAccount, thing: String, price: Int) = {
+  account.balance -= price // rewritten to account.balance = account.balance - price
+  println(s"I've bought $thing")
+  println(s"My account is now $account")
+}
+/*
+thread1 (shoes): balance == 50000
+  - account = 50000 - 3000 = 47000
+thread2 (shoes): balance == 50000
+  - account = 50000 - 4000 = 46000 // overwrites the memory of account.balance
+*/
+```
+
+Race conditions are bad because they can introduce bugs in multi threaded code. 
+
+**Possible Solutions**:
+
+1. Use `syncronized()`. The main property of the `syncronized` method no 2 threads can enter the expression that is 
+passed to it at the same time. 
+
+    ```scala
+    class BankAccount(var balance: Int) {
+     override def toString: String = "" + balance
+    } 
+    def buySafe(account: BankAccount, thing: String, price: Int) = {
+        account.synchronized {
+          // never 2 thread will evaluate this at the same time
+          account.balance -= price
+          println(s"I've bought $thing")
+          println(s"My account is now $account")
+        }
+      }
+    ```
+
+2. use the `@volatile` annotation.
+    `@volatile` annotated on a `val` or `var` means that any reads and writes to it are thread safe.
+    
+The more powerful and the more used option is the `synchronized` option, because it allows to put more expressions in 
+the same synchronized block.
+
+#### Synchronized
+
+entering a synchronized exrpession on an object *locks* the object.
+
+Only `AnyRef`s can have synchronized blocks.
+
+**General Principles**:
+
+- Make no assumptions about who gets the lock first
+
+- Keep locking to a minimum
+
+- Maintain *Thread Safety* at ALL times in parallel applications.
+
+
+### Thread Communication
+
+As mentioned before, we cannot really enforce a certain order of execution between threads, however, we can manage it. 
+
+#### The Producer-Consumer Problem
+
+**The scenario**: 2 threads are running in parallel: 
+
+1. The *Producer* - Has the sole purpose of setting some value x inside a container. 
+
+2. The *Consumer* - Has the sole purpose of extracting the value from inside the container.
+
+The problem is that both threads are working in parallel, so they don't know when the other has finished working.
+
+Somehow, we have to force the consumer to wait for the producer to finish it's job.
+ 
+#### *wait()* and *notify()* 
+
+`wait()`-ing on an object monitor suspends you (the thread) indefinitely.
+
+```scala
+val someObject = "Hello"
+// thread 1
+someObject.synchronized { // lock the object's monitor
+  // code part 1
+  someObject.wait() // release the lock and wait
+  // code part 2    // when allowed to proceed lock the monitor again and continue
+}
+// thread 2
+someObject.synchronized { // lock the object's monitor
+// code
+someObject.notify() // signal ONE sleeping thread they may continue
+// more code
+} // but only after I'm done and unlock the monitor 
+```
+
+Waiting and notifying only work in synchronized expressions.
+
