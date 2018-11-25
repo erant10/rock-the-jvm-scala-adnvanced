@@ -657,3 +657,68 @@ someObject.notify() // signal ONE sleeping thread they may continue
 
 Waiting and notifying only work in synchronized expressions.
 
+
+#### The *sleep* fallacy
+
+```scala
+var message = ""
+val awesomeThread = new Thread(() => {
+Thread.sleep(1000)
+  message = "Scala is awesome"
+})
+message = "Scala sucks"
+awesomeThread.start()
+Thread.sleep(2000)
+println(message)
+```
+
+The code above will almost always print "Scala is awesome", however that is **NOT** guaranteed.
+
+The following possible scenario may occur:
+- (main thread):
+    - message = "scala sucks"
+    - awesomeThread.start()
+    - sleep() - relieves execution for 2 seconds
+- (awesome thread)
+    - sleep() - relieves execution for 1 second
+- (OS gives the CPU to some important thread - takes the CPU for more than 2 seconds)
+- (OS gives the CPU back to the MAIN thread)
+    - println("scala sucks)
+- (OS gives the CPU to awesomeThread)
+    - message = "Scala is awesome)
+
+**How to fix the Sleep Fallacy?**
+
+synchronizing will not work!
+
+This is a sequential problem, and not a concurrency problem.
+
+A possible solution is to add `join()` after the awesome thread start because this will force the main thread to wait 
+for awesomeThread to finish. 
+
+```scala
+var message = ""
+val awesomeThread = new Thread(() => {
+  Thread.sleep(1000)
+  message = "Scala is awesome"
+})
+message = "Scala sucks"
+awesomeThread.start()
+
+awesomeThread.join()
+
+Thread.sleep(2000)
+println(message)
+```
+
+#### The Producer Consumer Problem - Continued
+
+Lets consider the scenario where the producer can produce 1 of 3 values inside a buffer, and the consumer consumes any 
+new values inside the buffer.
+
+The following observations can be made: 
+
+1. If the buffer is full, the producer must block until the consumer has finished extracting some value.
+
+2. If the buffer is empty, the consumer must block until the producer has finished setting some value
+
