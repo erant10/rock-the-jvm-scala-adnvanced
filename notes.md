@@ -549,13 +549,13 @@ If we want to execute some code in parallel, we should call the `start` method o
 * Unless configured otherwise, threads will behave differently and produce different results on each run.
 
 
-**Executors**
+#### Executors
 
 Threads are really expensive to start an kill, and a simple solution to this is to reuse them. 
 
 The standard library offers a standard API to reuse threads with executors and thread pools.
 
-**Race Conditions**
+#### Race Conditions
 
 A race condition is a situation when multiple threads are attempting the set the same memory zone at the same time.
 
@@ -618,7 +618,6 @@ Only `AnyRef`s can have synchronized blocks.
 
 - Maintain *Thread Safety* at ALL times in parallel applications.
 
-
 ### Thread Communication
 
 As mentioned before, we cannot really enforce a certain order of execution between threads, however, we can manage it. 
@@ -635,7 +634,8 @@ The problem is that both threads are working in parallel, so they don't know whe
 
 Somehow, we have to force the consumer to wait for the producer to finish it's job.
  
-#### *wait()* and *notify()* 
+
+#### *wait()* and *notify()*
 
 `wait()`-ing on an object monitor suspends you (the thread) indefinitely.
 
@@ -656,7 +656,6 @@ someObject.notify() // signal ONE sleeping thread they may continue
 ```
 
 Waiting and notifying only work in synchronized expressions.
-
 
 #### The *sleep* fallacy
 
@@ -722,3 +721,245 @@ The following observations can be made:
 
 2. If the buffer is empty, the consumer must block until the producer has finished setting some value
 
+### Futures and Promises
+
+#### Futures
+
+A future is a computation that will hold a value which is computed by some thread at some point in time.
+
+For example:
+
+```scala
+import scala.concurrent.Future
+import scala.util.{Failure, Success}
+import scala.concurrent.ExecutionContext.Implicits.global
+
+def calculateTheMeaningOfLife: Int = {
+  // simulate long computation
+  Thread.sleep(2000)
+  42
+}
+
+val aFuture = Future {
+  calculateTheMeaningOfLife
+}
+
+println(aFuture.value) // Option[Try[Int]]
+
+aFuture.onComplete {
+  case Success(meaningOfLife) => println(s"The meaning of life is $meaningOfLife")
+  case Failure(e) => println(s"I have failed with $e")
+} // will be called by SOME thread
+```
+
+
+##### Functional Composition of Futures
+
+Chaining Futures using nested `onComplete` calls results in a code that is not readable and not sustainable. 
+
+To solve this we will make use of `map`, `flatMap` and `filter`.
+
+`map` can be used to create a `Future` with a certain return type to a `Future` with a different return type.
+If the original future happens to fail with an exception, then the mapped future will fail with the same exception.
+
+Therefore a chain of future can be written using for comprehension, which make the code much more readable.
+
+```
+val mark = SocialNetwork.fetchProfile("fd.id.1-zuck")
+mark.onComplete {
+  case Success(markProfile) => {
+    val bill = SocialNetwork.fetchBestFriend(markProfile)
+    bill.onComplete {
+      case Success(billProfile) => markProfile.poke(billProfile)
+      case Failure(e) => e.printStackTrace()
+    }
+  }
+  case Failure(ex) => ex.printStackTrace()
+}
+/* Can be replaced with: */
+for {
+    mark <- SocialNetwork.fetchProfile("fd.id.1-zuck")
+    bill <- SocialNetwork.fetchBestFriend(mark)
+} mark.poke(bill)
+```
+
+
+##### Fallbacks
+
+1. `recover` can be called to handle cases when the Future might fail, and return a dummy/default value instead.
+    
+    ```
+    val aProfileNoMatterWhat = SocialNetwork.fetchProfile("unknown id").recover {
+      case e: Throwable => Profile("fb.id.0-dummy", "Forever alone")
+    }
+    ```
+
+2. Instead of returning a default/dummy value, `recoverWith` can be used to return another future which will surely 
+    succeed (or at least has a high probability of success).
+    
+    ```
+    val aFetchedProfileNoMatterWhat = SocialNetwork.fetchProfile("unknown id").recoverWith {
+      case e: Throwable => SocialNetwork.fetchProfile("fb.id.0-dummy")
+    }
+    ```
+    
+3. `fallbackTo` can also be used to achieve a similar logic:
+
+    - if the original `Future` succeeds then its value will be used.
+    
+    - if it fails with an exception, then the argument `Future` will be run.
+    
+        - if the argument `Future` also fails then the result object will hold the original `Future`'s exception.
+    
+    ```
+    val fallbackResult = SocialNetwork.fetchProfile("unknown id").fallbackTo(
+      SocialNetwork.fetchProfile("fb.id.0-dummy")
+    )
+    ```
+
+##### Blocking on a Future
+
+Sometimes it makes sense to block on a Future for critical operations, and we might want to make sure that the operation
+is fully complete before moving on.
+
+This can be achieved using the `Await.result` method
+
+```
+Await.result(transactionStatusFuture, 2.seconds)
+```
+
+The first argument is the Future that need to finish computing, and the second argument is the timeout.
+
+If the result is not returned before the timeout, a `Timeout` exception will be thrown.
+
+#### Promises
+
+`Future`s are the functional way of composing non-blocking computations which will return at some point. 
+
+However, Notice that we can only read or manipulate the results on `Future` by using `onComplete` or by using functional
+composition (`map`, `flatMap`, `filter`, `recover` etc..). 
+
+This means that `Future`s are *read-only* when they are done, but sometimes we need to specifically set or complete a 
+`Future` at a point of our choosing - this is where `Promise`s come in.
+
+A `Promise` is a manager or container of one or more `Future`s.
+
+##### The Producer Consumer Problem Revisited
+
+```scala
+import scala.concurrent.{Await, Future, Promise}
+import scala.util.{Failure, Random, Success}
+import scala.concurrent.ExecutionContext.Implicits.global
+
+val promise = Promise[Int]() // a controller over a Future
+val future = promise.future
+
+// thread 1 - "consumer"
+future.onComplete {
+  case Success(r) => println(s"[consumer] I've received ${r}")
+}
+
+// thread 2 - "producer"
+val producer = new Thread(() => {
+    println("[producer] crunching numbers...")
+    Thread.sleep(1000) // long computation
+    promise.success(42) // "Fulfilling" the promise
+    // promise.failure(new RuntimeException) // "rejecting" the promise
+    println("[producer] done!")
+})
+
+producer.start()
+```
+
+The Future-Promise paradigm is more powerful as it separates the concern of reading, handling futures, and of writing 
+to a promise while eliminating concurrency issues almost completely, as it give complete control of when and how to set
+a value to a future. 
+
+### Parallel Libraries
+
+#### Parallel Collections
+
+A parallel collection means that operations on the collection are handled by multiple threads at the same time.
+
+The par method transforms the collection to a parallel version of it.
+
+Among the collections that can have a parallel version are `Seq`,`Vector`, `Array`, `Map`, `Set` and many more.
+
+Parallel collections operate on what is called the **Map-Reduce** model.
+
+The Map-Reduce means that when an operation is performed on a parallel collection, it will be split the elements into 
+chunks (using the `Splitter`) which will be processed independently by a separate thread (the `map` step), and finally the results are 
+combined together (the *reduce* step, using a `Combiner`).
+
+The parallel collections can be used in the same way that sequential collections are used (in the sense that they have 
+`map`, `flatMap`, `filter`, `foreach`, `reduce`, `fold`).
+
+**Important notes**:
+
+1. some operations (especially `fold` and `reduce`) are not always safe to perform. For example: 
+
+    ```scala
+    println(List(1,2,3).reduce(_ - _)) // -4
+    println(List(1,2,3).par.reduce(_ - _)) // 2
+    ```
+    
+2. Sometimes you need synchronization not on the collections themselves but on the results they act upon due to race 
+    conditions of the running threads. 
+    
+    For example, due to race condition, the following code does not guarantee that the result will be 6:
+    
+    ```scala
+    var sum = 0
+    List(1,2,3).par.foreach(sum += _)
+    println(sum)
+    ```
+
+3. Configuring a parallel collection is done with a member called `tasksupport`. 
+
+    For example:
+    
+    ```scala
+    import java.util.concurrent.ForkJoinPool    
+    import scala.collection.parallel.ForkJoinTaskSupport
+    import scala.collection.parallel.immutable.ParVector
+
+    val aParVector = ParVector[Int](1,2,3)
+    aParVector.tasksupport = new ForkJoinTaskSupport(new ForkJoinPool(2))
+    ```
+    
+    Most commonly, we will use `tasksupport` with a `new ForkJoinTaskSupport(new ForkJoinPool(n))` with the required
+    number of threads.
+    
+    To implement a custom class that extends the `TaskSupport` trait, the following methods need to be implemented:
+    
+    - `def execute[R, Tp](fjtask: Task[R, Tp]): () => R`: Schedules a thread to run in parallel. 
+    
+    - `executeAndWaitResult[R, Tp](task: Task[R, Tp]): R`: Schedules a thread to run in parallel, blocking until a 
+    result is available.
+    
+    - `def parallelismLevel: Int`: The number of CPU cores that this should run
+    
+    - `val environment: AnyRef`: The actual manager that manages the threads.
+
+#### Atomic Ops and References
+
+An atomic operation is one that cannot be divided - it either runs fully or not at all, meaning it cannot be intercepted
+by another thread.
+
+The atomic types type have the property that they have atomic operations. 
+
+For example:
+
+- the `get` method is thread safe. Meaning that when extracting the value inside the atomic reference, no other thread 
+can read or write to it.
+
+- the `set` method.
+
+- `getAndSet` extracts the current value and setting it to a new value in a thread safe way.
+
+- `compareAndSet` sets the value if the reference equality (shallow equality) is true.
+
+- `updateAndGet` & `getAndUpdate` applies a function to the current value and sets the value to the result (in opposite
+    order).
+
+- `accumulateAndGet` & `getAndAccumulate` which applies an accumulator.

@@ -267,9 +267,13 @@ object ThreadCommunication extends App {
   val sam = Friend("Sam")
   val pierre = Friend("Pierre")
 
-  new Thread(() => sam.pass(pierre)).start()
-  new Thread(() => pierre.pass(sam)).start()
+
+  // deadlock
+  new Thread(() => sam.bow(pierre)).start()
+  new Thread(() => pierre.bow(sam)).start()
 
   // livelock
+  new Thread(() => sam.pass(pierre)).start()
+  new Thread(() => pierre.pass(sam)).start()
 
 }
