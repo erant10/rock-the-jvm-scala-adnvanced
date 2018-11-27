@@ -674,16 +674,27 @@ println(message)
 The code above will almost always print "Scala is awesome", however that is **NOT** guaranteed.
 
 The following possible scenario may occur:
+
 - (main thread):
+
     - message = "scala sucks"
+
     - awesomeThread.start()
+
     - sleep() - relieves execution for 2 seconds
+
 - (awesome thread)
+
     - sleep() - relieves execution for 1 second
+
 - (OS gives the CPU to some important thread - takes the CPU for more than 2 seconds)
+
 - (OS gives the CPU back to the MAIN thread)
+
     - println("scala sucks)
+
 - (OS gives the CPU to awesomeThread)
+
     - message = "Scala is awesome)
 
 **How to fix the Sleep Fallacy?**
@@ -963,3 +974,294 @@ can read or write to it.
     order).
 
 - `accumulateAndGet` & `getAndAccumulate` which applies an accumulator.
+
+## Section 4 - Implicits
+
+### Introduction
+
+Implicits allows to implement robust frameworks and intuitive APIs and advanced functional programming concepts.
+
+There are 2 main uses for implicits:
+
+1. Implicit conversions:
+    
+    ```scala
+    case class Person(name: String) {
+     def greet = s"Hi, my name is $name"
+    }
+    
+    // convert a string to a person
+    implicit def fromStringToPerson(str: String): Person = Person(str)
+    
+    println("Peter".greet) // compiler converts to println(fromStringToPerson("Peter").greet)
+    ``` 
+    
+    The compiler will look for any class that has a greet method and look for a conversion method from String to that 
+    class and will use that to instantiate that class. 
+    If a match is found with more than 1 class, the compiler will fail. 
+    
+2. Implicit parameters:
+
+    ```scala
+    def increment(x: Int)(implicit amount: Int) = x + amount
+    implicit val defaultAmount = 10 // NOT the same as default arguments
+    increment(2)
+    ```
+
+In this section we will discuss implicits in depth.
+
+### Organizing Implicits
+
+We will examine Implicits through an example of List sorting.
+
+The `sorted` method takes an implicit parameter called `ordering`.
+
+When we write `List(1,4,5,3,2).sorted` the compiler will look for the implicit `ordering` value inside the 
+`scala.Predef` which is automatically imported to any scala application.
+
+However any implicit that we define ourselves will take precedence over the implicits defined inside `scala.Predef`.
+
+We will discuss:
+
+1. How Does the compiler looks for implicits and where?
+
+2. Which implicits have a priority over others?
+
+**Note:** Implicit (used as implicit parameters) can be:
+
+- val/var
+
+- object
+
+- accessor methods - defs with no parentheses
+
+#### Implicit Scope
+
+The implicit scope is composed of several parts and there are rules that prioritize some rules over others.
+
+The scopes are (from highest to lowest priority):
+ 
+1. Normal Scope = LOCAL SCOPE
+
+2. Imported Scope
+
+3. Companions of all types involved in the method signature
+
+
+#### Best Practices
+
+When defining an implicit cal
+
+1. If: 
+    
+    - There is a single possible value for it.
+    
+    - The code for the type can be edited. 
+    
+    ----> define the implicit in the **companion object** for that type.
+
+2. If: 
+    
+    - There are 2 possible values for it, but a single "good" one that applies to most cases
+    
+    - The code for the type can be edited.  
+    
+    ----> define the "good" implicit in the **companion object** 
+    
+    ----> define the other implicit elsewhere (preferably in the local scope).
+
+3. If there are many possible values
+    
+    ----> package the implicits separately in different objects, and make the user explicitly import them.
+
+### Type Classes
+
+A type class is a trait that takes a type and describes what operations can be applied to that type.
+
+Say we want to implement a trait `HTMLWritable` which has a `toHTML` method, and we want to explore different code 
+design approaches to do this.
+
+1. Create a class and implement `toHTML`:
+
+    ```scala
+    trait HTMLWritable {
+       def toHTML: String
+    }
+    case class User(name: String, age: Int, email: String) extends HTMLWritable {
+       def toHTML: String = s"<div>$name ($age yo) <a href='$email'/></div>"
+    }
+    User("John", 32, "john@rockthejvm.com").toHTML
+    ```
+    
+    There are 2 big disadvantages to this approach:
+     
+    1. Only works for the types WE write (to apply on other types we would have to implement converters)
+     
+    2. Only ONE implementation out of quite a number
+
+
+2. Pattern matching:
+
+    ```scala
+    trait HTMLWritable {
+       def toHTML: String
+    }
+    case class User(name: String, age: Int, email: String) extends HTMLWritable {
+       def toHTML: String = s"<div>$name ($age yo) <a href='$email'/></div>"
+    }
+    object HTMLSerializePM {
+       def serializeToHtml(value: Any)= value match {
+         case User(n,a,e) =>  s"<div>$n ($a yo) <a href='$e'/></div>"
+         case java.util.Date => "This is a Date"
+         case _ =>
+       }
+    }
+    ```
+    
+    Disadvantages:
+    
+    1. Lost type safety
+    
+    2. Need to modify this code every time
+    
+    3. still ONE implementation
+
+3. Use a trait with a type parameter and extend it to the `User` type:
+
+    ```scala
+    case class User(name: String, age: Int, email: String)
+    trait HTMLSerializer[T] {
+       def serialize(value: T): String
+    }
+    object UserSerializer extends HTMLSerializer[User] {
+       def serialize(user: User): String = s"<div>${user.name} (${user.age} yo) <a href='${user.email}'/></div>"
+    }
+    val john = User("John", 32, "john@rockthejvm.com")
+    ```
+    
+    Advantages:
+    
+    1. We can define serializers for other types (even ones that we didn't create).
+        
+        ```scala
+        trait HTMLSerializer[T] {
+           def serialize(value: T): String
+        }
+        import java.util.Date
+        object DateSerializer extends HTMLSerializer[Date] {
+            override def serialize(date: Date): String = s"<div>${date.toString()}</div>"
+        }
+        ```
+        
+    2. We can define MULTIPLE serializers:
+    
+        ```scala
+        case class User(name: String, age: Int, email: String)
+        trait HTMLSerializer[T] {
+           def serialize(value: T): String
+        }
+        object PartialUserSerializer extends HTMLSerializer[User] {
+           def serialize(user: User): String = s"<div>${user.name}</div>"
+        }
+        ```
+        
+    This `HTMLSerializer` is called a **Type Class**
+
+A **Type Class** specifies a set of operations that can be applied to a given type.
+
+All the implementors of a type class are called **Type Class Instances** (even though they are types themselves).
+
+A **normal** class describes a collections of methods and properties that something **must have** in order 
+to belong to that specific type.
+
+A **Type Class** lifts this concept to a higher level applying it to **types**. 
+So it describes a collection of properties or methods that a **type** must have in order to belong to that type class.
+
+In general, a typical Type Class looks like this:
+
+```scala
+trait MyTypeClassTemplate[T] {
+  def action(value: T): String
+}
+```
+
+#### Implicits with Type Classes
+
+Type Class instances can be used implicitly, meaning the compiler will infer which Type class instance is appropriate 
+without having to say explicitly.
+
+```scala
+trait HTMLSerializer[T] {
+  def serialize(value: T): String
+}
+object HTMLSerializer {
+  def serialize[T](value: T)(implicit serializer: HTMLSerializer[T]): String  = serializer.serialize(value)
+  def apply[T](implicit serializer: HTMLSerializer[T]) = serializer
+}
+case class User(name: String, age: Int, email: String)
+
+implicit object IntSerializer extends HTMLSerializer[Int] {
+  override def serialize(value: Int): String = s"<div style='color:blue'>$value</div>"
+}
+implicit object UserSerializer extends HTMLSerializer[User] {
+  override def serialize(user: User): String = s"<div>${user.name} (${user.age} yo) <a href='${user.email}'/></div>"
+}
+val john = User("John", 32, "john@rockthejvm.com")
+println(HTMLSerializer.serialize(42)) // IntSerializer is implied
+println(HTMLSerializer.serialize(john)) // UserSerializer is implied 
+```
+
+### Type Enrichment (Pimping)
+
+Declaring a class as `implicit` makes it an **implicit class**.
+
+Implicit classes must have 1 argument.
+
+Example: 
+
+```scala
+implicit class RichInt(value: Int) {
+  def isEven: Boolean = value % 2 == 0
+  def sqrt: Double = Math.sqrt(value)
+}
+new RichInt(42).sqrt // the "standard" way
+42.isEven // the implicit way
+```
+
+Other examples of rich types that are used in practice:
+
+```scala
+1 to 10 // RichInt
+
+import scala.concurrent.duration._
+3.seconds
+```
+
+**Note**: The compiler doesn't do multiple searches.
+
+```scala
+implicit class RichInt(val value: Int) extends AnyVal {
+  def isEven: Boolean = value % 2 == 0
+  def sqrt: Double = Math.sqrt(value)
+}
+implicit class RicherInt(richInt: RichInt) {
+  def isOdd: Boolean = richInt.value % 2 != 0
+}
+42.isEven // compiler converts to new RichInt(42).isEven
+// 42.isOdd // does not compile
+```
+
+#### Pimp libraries Responsibly
+
+Implicit conversions are discouraged because if they cause a bug, they are VERY hard to trace back.
+
+##### General tips for type enrichments:
+
+- Keep type enrichments to **implicit classes** and **type classes**.
+
+- Avoid implicit defs as much as possible.
+
+- Package implicits clearly, bring into scope only what you need.
+
+- If you abslutely need conversions - make them as specific as possible.
+ 
