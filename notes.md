@@ -1263,5 +1263,259 @@ Implicit conversions are discouraged because if they cause a bug, they are VERY 
 
 - Package implicits clearly, bring into scope only what you need.
 
-- If you abslutely need conversions - make them as specific as possible.
+- If you absolutely need conversions - make them as specific as possible.
  
+
+### Type Enrichment And Type Classes
+
+Type enrichments in the context of type classes allow us to invoke the type class pattern for any type for which 
+we have the required method.
+
+For example:
+
+```scala
+case class User(name: String, age: Int, email: String)
+trait HTMLSerializer[T] {
+  def serialize(value: T): String
+}
+implicit object UserSerializer extends HTMLSerializer[User] {
+  def serialize(user: User): String = s"<div>${user.name} (${user.age} yo) <a href='${user.email}'/></div>"
+}
+object HTMLSerializer {
+  def serialize[T](value: T)(implicit serializer: HTMLSerializer[T]): String  =
+    serializer.serialize(value)
+
+  def apply[T](implicit serializer: HTMLSerializer[T]): HTMLSerializer[T] = serializer
+}
+/* The magic */
+implicit class HTMLEnrichment[T](value: T) {
+  def toHTML(implicit serializer: HTMLSerializer[T]): String = serializer.serialize(value)
+}
+val arthur = User("Arthur", 43, "arthur@rockthejvm.com")
+println(arthur.toHTML(UserSerializer)) 
+// compiler rewrites to `println(new HTMLEnrichment[User](arthur).toHTML(UserSerializer))`
+```
+
+This allows us to: 
+
+- Extend the functionality to new types
+- Choose an implementation (either by importing the implicit serializer to the local scope or passing it
+explicitly: `arthur.toHTML(PartialUserSerializer)`)
+- Be super expressive.
+
+
+Now the type classes are composed of several types: 
+
+- Type class itself
+    
+    ```
+    trait HTMLSerializer[T] {
+        def serialize(value: T): String
+    }
+    ```
+
+- Type class instances (some of which are implicit)
+
+    ```
+    implicit object UserSerializer extends HTMLSerializer[User] {
+      def serialize(user: User): String = s"<div>${user.name} (${user.age} yo) <a href='${user.email}'/></div>"
+    }
+    implicit object IntSerializer extends HTMLSerializer[Int] {
+        override def serialize(value: Int): String = s"<div style='color:blue'>$value</div>"
+    }
+    ```
+
+- Companion object
+    
+    ```
+    object HTMLSerializer {
+        def serialize[T](value: T)(implicit serializer: HTMLSerializer[T]): String  =
+            serializer.serialize(value)
+    
+        def apply[T](implicit serializer: HTMLSerializer[T]): HTMLSerializer[T] = serializer
+    }
+    ```
+
+- Conversion with implicit classes 
+    
+    ```
+    implicit class HTMLEnrichment[T](value: T) {
+        def toHTML(implicit serializer: HTMLSerializer[T]): String = serializer.serialize(value)
+    }
+    ```
+
+#### Context Bounds
+
+```
+def htmlBoilerPlate[T](content: T)(implicit serializer: HTMLSerializer[T]): String =
+  s"<html><body>${content.toHTML(serializer)}</body></html>"
+
+// can be replaced with 
+def htmlSugar[T: HTMLSerializer](content: T): String =
+  s"<html><body>${content.toHTML}</body></html>"
+```
+
+#### Implicitly
+
+At some part of our code, it makes sense that we would want to surface implicit values.
+
+To do so, we can use the `implicitly` keyword. 
+
+```scala
+case class Permissions(mask: String)
+implicit val defaultPermissions = Permissions("0744")
+
+// ...
+// in some other part of the code
+val standardPerms = implicitly[Permissions] // == defaultPermissions
+// ...
+```
+
+### The Magnet Pattern
+
+The magnet pattern is a use case of type classes which aims at solving some of the problems created by method 
+overloading, such as:
+
+- Type Erasure
+- lifting does'nt work for all overloads
+- Code duplication
+- Type inference and default args 
+
+Example: Actors
+
+```scala
+import scala.concurrent.Future
+
+class P2PRequest
+class P2PResponse
+class Serializer[T]
+
+trait Actor {
+    def receive(statusCode: Int): Int
+    def receive(request: P2PRequest): Int
+    def receive(request: P2PResponse): Int
+    def receive[T: Serializer](message: T): Int
+    def receive[T: Serializer](message: T, statusCode: Int): Int
+    def receive(future: Future[P2PRequest]): Int
+    // lots of overloads
+}
+```
+
+These implementations of the Actor `receive` method will result in all of the problems mentioned above which are caused
+by overloading.
+
+So instead we will use the following implementation:
+
+```scala
+import scala.concurrent.Future
+
+class P2PRequest
+class P2PResponse
+class Serializer[T]
+
+trait MessageMagnet[Result] {
+  def apply(): Result
+}
+def receive[R](magnet: MessageMagnet[R]): R = magnet()
+implicit class FromP2PRequest(request: P2PRequest) extends MessageMagnet[Int] {
+  def apply(): Int = {
+    // logic for handling P2P Request
+    println("handling P2P Request")
+    42
+  }
+}
+implicit class FromP2PResponse(request: P2PResponse) extends MessageMagnet[Int] {
+  def apply(): Int = {
+    // logic for handling P2P Response
+    println("handling P2P Response")
+    24
+  }
+}
+receive(new P2PRequest) // 42
+receive(new P2PResponse) // 24
+```
+
+The Magnet Pattern has benefits and drawbacks:
+
+**Benefits**:
+
+- No more type erasure problems
+    
+    ```
+    implicit class FromResponseFuture(future: Future[P2PResponse]) extends MessageMagnet[Int] {
+        override def apply(): Int = 2
+    }
+    implicit class FromRequestFuture(future: Future[P2PRequest]) extends MessageMagnet[Int] {
+        override def apply(): Int = 3
+    }
+    
+    println(receive(Future(new P2PRequest))) // 3 
+    println(receive(Future(new P2PResponse))) // 2
+    ```
+
+- Lifting works
+    
+    ```scala
+    trait MathLib {
+      def add1(x: Int): Int =  x + 1
+      def add1(s: String): Int = s.toInt + 1
+      // many add1 overloads
+    }
+    // "magnetize"
+    trait AddMagnet {
+      def apply(): Int
+    }
+    def add1(magnet: AddMagnet) : Int = magnet()
+    
+    implicit class AddInt(x: Int) extends AddMagnet {
+      override def apply(): Int = x + 1
+    }
+    
+    implicit class AddString(s: String) extends AddMagnet {
+      override def apply(): Int = s.toInt + 1
+    }
+    
+    val addFV = add1 _ // lifting
+    println(addFV(1)) // 2
+    println(addFV("3")) // 4
+    ```
+    
+**Drawbacks**:
+
+- Verbose
+
+- Harder to read
+
+- Can't name or place default arguments
+
+- Call by name does'nt work correctly 
+    
+    ```scala
+    class Handler {
+      def handle(s: => String) = {
+        println(s)
+        println(s)
+      }
+      // other overloads
+    }
+    trait HandleMagnet {
+      def apply(): Unit
+    }
+    def handle(magnet: HandleMagnet) = magnet()
+    implicit class StringHandle(s: => String) extends HandleMagnet {
+      override def apply(): Unit = {
+        println(s)
+         println(s)
+      }
+    }
+    def sideEffectMethod(): String = {
+      println("Hello Scala")
+       "Ha ha ha"
+    }
+    handle(sideEffectMethod()) // works properly
+    handle {
+      println("Hello Scala")
+      "Ha ha ha"
+    } // only "ha ha ha" is passed
+    ```
+
