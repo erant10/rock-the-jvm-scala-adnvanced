@@ -1519,3 +1519,166 @@ The Magnet Pattern has benefits and drawbacks:
     } // only "ha ha ha" is passed
     ```
 
+### Scala-Java Conversions
+
+Sometimes we need to inter-operate with java libraries.
+
+Collections are particularly a pain-point because the types are almost entirely different.
+
+In order to enable conversions between Java and Scala collections, we use the `collection.JavaConverters` package.
+
+For example:
+
+```scala
+import java.{util => ju}
+
+import collection.JavaConverters._
+
+val javaSet: ju.Set[Int] = new ju.HashSet[Int]()
+(1 to 5).foreach(javaSet.add)
+println(javaSet)
+
+val scalaSet = javaSet.asScala
+```
+
+Among popular conversions are:
+
+- Iterators
+- Iterables
+- ju.List - scala.mutable.Buffer
+- ju.Set - scala.mutable.Map
+
+There is also Scala to Java (mutable) Collections
+
+```scala
+import collection.JavaConverters._
+import collection.mutable._
+
+val numbersBuffer = ArrayBuffer[Int](1,2,3)
+val juNumbersBuffer = numbersBuffer.asJava
+println(juNumbersBuffer.asScala)
+```
+
+*notice* that when converting from java (mutable) to scala, we will get the exact same reference.
+
+Some scala to java conversions cannot give back the same scala object
+
+```scala
+import collection.JavaConverters._
+val numbers = List(1,2,3)
+val juNumbers = numbers.asJava
+val backToScala = juNumbers.asScala
+println(backToScala eq numbers) // shallow equal -> false
+println(backToScala == numbers) // deep equal -> true
+```
+
+## Section 5 - Type System
+
+### Rock the Type System
+
+#### Convenience
+
+```scala
+trait Writer[T] {
+  def write(value: T): Unit
+}
+trait Closeable {
+  def close(status: Int): Unit
+}
+trait GenericStream[T] {
+  // some methods
+  def foreach[T](f: T => Unit): Unit
+}
+def processStream[T](stream: GenericStream[T] with Writer[T] with Closeable): Unit = {
+  // access to the entire API
+  stream.foreach(println)
+  stream.close(0)
+}
+```
+
+#### The Diamond Problem
+
+```scala
+trait Animal { def name: String }
+trait Lion extends Animal { override def name: String = "Lion" }
+trait Tiger extends Animal  { override def name: String = "Tiger" }
+trait Mutant extends Lion with Tiger 
+// equivalent to:
+// Mutant extends Animal with { override def name: String = "Lion" } 
+// with { override def name: String = "Tiger" } 
+```
+
+Notice that there no Conflict for the `name` method?
+
+in fact the name method will always refer to the `Tiger` implementation of `name`.
+
+This is because **the last override always gets picked**.
+
+#### The super problem + Type linearization
+
+In scala the `super` has a higher significance than in java.
+
+```scala
+trait Cold {
+  def print = println("cold")
+}
+trait Green extends Cold {
+  override def print: Unit = {
+    println("green")
+    super.print // println("cold")
+  }
+}
+trait Blue extends Cold {
+  override def print: Unit = {
+   println("blue")
+   super.print // println("cold")
+  }
+}
+class Red {
+  def print = println("red")
+}
+class White extends Red with Green with Blue {
+  override def print: Unit = {
+    println("white")
+    super.print
+  }
+}
+
+val color = new White
+color.print // white blue green cold
+```
+
+Notice that in the above example, "red" is **not** printed!
+
+```
+Cold
+ |--- Green ---|
+ |___ Blue  ___|
+               |
+Red -----------|
+               |
+             White
+```
+
+- **Cold** = `AnyRef` with `<Cold>`
+- **Green** = `Cold` with `<Green>` = `AnyRef` with `<Cold>` with `<Green>`   
+- **Blue** = `Cold` with `<Blue>` = `AnyRef` with `<Cold>` with `<Blue>` 
+- **Red** = `AnyRef` with `<Red>`
+- **White** = `Red` with `Green` with `Blue` with `<White>`
+    
+    = `AnyRef` with `<Red>` 
+    
+    with (`AnyRef` with `<Cold>` with `<Green>`) 
+    
+    with (`AnyRef` with `<Cold>` with `<Blue>`) 
+    
+    with `<White>`
+    
+    **Type Linearization:**
+        
+    = `AnyRef` with `<Red>` with `<Cold>` with `<Green>` with `<Blue>` with `<White>`
+
+In the context of **Type Linearization** if you call `super` this will take a look on the type that is **immediately to 
+the left** in this type linearization:
+
+`AnyRef` with `<Red>` with `<Cold>` <-- super <-- `<Green>` <-- super <-- `<Blue>` <-- super <-- `<White>`
