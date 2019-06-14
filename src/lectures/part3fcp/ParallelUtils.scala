@@ -3,7 +3,7 @@ package lectures.part3fcp
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicReference
 
-import scala.collection.parallel.{ForkJoinTaskSupport, Task, TaskSupport}
+import scala.collection.parallel.ForkJoinTaskSupport
 import scala.collection.parallel.immutable.ParVector
 
 object ParallelUtils extends App {
