@@ -1,7 +1,5 @@
 package lectures.part5ts
 
-import java.io.Writer
-
 object RockingInheritance extends App {
 
   // 1 - convenience

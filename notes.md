@@ -1682,3 +1682,117 @@ In the context of **Type Linearization** if you call `super` this will take a lo
 the left** in this type linearization:
 
 `AnyRef` with `<Red>` with `<Cold>` <-- super <-- `<Green>` <-- super <-- `<Blue>` <-- super <-- `<White>`
+
+### Variance
+
+```scala
+trait Animal
+  class Dog extends Animal
+  class Cat extends Animal
+  class Crocodile extends Animal
+
+  // what is variance?
+  // "inheritance" - type substitution of generics
+
+  class Cage[T]
+```
+
+**Should `Cage[Cat]` extend `Cage[Animal]` ???**
+
+- Yes - Convariance
+ 
+    ```scala
+    class CCage[+T]
+    val ccage: CCage[Animal] = new CCage[Cat]
+    ```
+- No - Invariance
+
+    ```scala
+    class ICage[T]
+    val icage: ICage[Animal] = new ICage[Cat] // Does not compile
+    ```
+    
+- Hell No (the opposite) - Contravariance
+
+    ```scala
+    class XCage[-T]
+    val xCage: XCage[Cat] = new XCage[Animal] 
+    ```
+
+#### Covariant Positions
+
+```scala
+// covariant positions
+class CovariantCage[+T](val animal: T) // the animal val in of a covariant position
+
+// class ContravariantCage[-T](val animal: T) // Does NOT compile
+// Error:(32, 35) contravariant type T occurs in covariant position in type => T of value animal
+
+// val catCage: XCage[Cat] = new CovariantCage[Animal](new Crocodile)
+```
+
+Covariant positions also apply to vars
+
+```scala
+class CovariantVariableCage[-T](var animal: T) // types of vars are in contravariant position
+
+val cCage: CCage[Animal] = new CCage[Cat](new Cat)
+cCage.animal = new Crocodile
+```
+
+The only acceptable type for a variable field is **Invariant**
+```scala
+class InvariantVariableCage[T](var animal: T) // OK
+```
+
+Then How do we create Covariant collections?
+
+```scala 
+class MyList[+A] {
+    def add[B >: A](elemet: B): MyList[B] = new MyList[B] // widening the type
+}
+
+val emptyList = new MyList[Kitty]
+val animals: MyList[Kitty] = emptyList.add(new Kitty) // fine - new Kitty is of the type Kitty
+val moreAnimals = animals.add(new Cat) // The Compiler is happy because cat is a supertype of Kitty
+val evenMoreAnimals = moreAnimals.add(new Dog) // compiler widens MyList[Cat] to MyList[Animal]
+```
+
+*Remember*: Method arguments are in contravariant positions
+
+#### Return Types
+
+```scala
+class PetShop[-T] {
+    // def get(isItAPuppy: Boolean): T // Method return types are in covariant positions
+    /*
+    cal catShop = new PetShop[Animal] {
+      def get(isItAPuppy: Boolean): Animal = new Cat
+    }
+    val dogShop: PetShop[Dog] = catShop
+    dogShop.get(true) // EVIL CAT
+     */
+ }
+```
+
+How do we solve this
+```scala
+trait Animal
+class Dog extends Animal
+
+class PetShop[-T] {
+  def get[S <: T](isItAPuppy: Boolean, defaultAnimal: S): S = defaultAnimal
+}
+
+val shop: PetShop[Dog] = new PetShop[Animal]
+// val evilCat = shop.get(true, new Cat) // illegal
+class TerraNova extends Dog
+val bigFurry = shop.get(true, new TerraNova)
+
+```
+
+**Big Rule:**
+
+- method arguments are in contravariant position
+
+- return types are in covariant position
